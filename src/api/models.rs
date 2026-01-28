@@ -37,13 +37,85 @@ pub struct Note {
     pub color_id: i32,
     pub create_date: i64,
     pub modify_date: i64,
+    #[serde(default, alias = "Subject", alias = "title", alias = "topic", alias = "name")]
     pub subject: String,
+    #[serde(default, alias = "Title", alias = "Topic", alias = "Name")]
+    pub title: Option<String>,
+    #[serde(default, alias = "contentPreview", alias = "summary", alias = "content_preview")]
     pub snippet: String,
     pub content: Option<String>,
+    pub extra_info: Option<String>,
     #[serde(deserialize_with = "deserialize_id")]
     pub tag: String,
     pub status: String,
     pub setting: Option<Setting>,
+}
+
+impl Note {
+    pub fn display_title(&self) -> String {
+        // 1. Try title field
+        if let Some(ref t) = self.title {
+            let s = strip_tags(t);
+            if !s.is_empty() { return s; }
+        }
+
+        // 2. Try subject field
+        let s = strip_tags(&self.subject);
+        if !s.is_empty() { return s; }
+
+        // 3. Try extra_info parsing
+        if let Some(ref extra) = self.extra_info {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(extra) {
+                if let Some(Value::String(t)) = map.get("title") {
+                    let s = strip_tags(t);
+                    if !s.is_empty() { return s; }
+                }
+            }
+        }
+
+        // 4. Try snippet first line
+        let clean_snippet = strip_tags(&self.snippet);
+        let first_line = clean_snippet.lines().next().unwrap_or("").trim();
+        if !first_line.is_empty() {
+             return first_line.to_string();
+        }
+
+        "[No Title]".to_string()
+    }
+
+    pub fn clean_snippet(&self) -> String {
+        strip_tags(&self.snippet)
+    }
+
+    pub fn clean_subject(&self) -> String {
+        strip_tags(&self.subject)
+    }
+}
+
+pub fn strip_tags(text: &str) -> String {
+    // 1. Decode entities first so we can find tags like <text>
+    let decoded = text.replace("&nbsp;", " ")
+                      .replace("&lt;", "<")
+                      .replace("&gt;", ">")
+                      .replace("&amp;", "&")
+                      .replace("&quot;", "\"")
+                      .replace("&apos;", "'");
+
+    let mut result = String::with_capacity(decoded.len());
+    let mut in_tag = false;
+    for c in decoded.chars() {
+        if c == '<' {
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(c);
+        }
+    }
+    result.replace("\n", " ")
+          .replace("\r", " ")
+          .trim()
+          .to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

@@ -1,5 +1,7 @@
 mod api;
 mod webview;
+mod state;
+mod gui;
 
 use tokio::time::{sleep, Duration};
 use crate::api::Client;
@@ -32,12 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Some(ref c) = client {
                     println!("--- Background API Operation ---");
-                    match c.list_notes(10).await {
+                    match c.list_notes(100).await {
                         Ok(notes) => {
-                            println!("Found {} notes in background:", notes.entries.len());
-                            for note in notes.entries.iter().take(3) {
-                                println!("  - [{}] {}", note.id, note.subject);
-                            }
+                            println!("Found {} notes in background.", notes.entries.len());
+                            state::update_notes(notes.entries);
                         }
                         Err(e) => {
                             println!("Background API error: {}", e);

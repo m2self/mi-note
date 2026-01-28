@@ -177,6 +177,13 @@ impl Client {
             println!("API Error: No 'data' in response. Body: {}", json);
             "no data in response"
         })?;
+
+        // Debug: Write all notes to a scratch file for diagnosis
+        if let Some(entries) = data.get("entries").and_then(|e| e.as_array()) {
+            let _ = std::fs::write("..\\..\\scratch\\all_notes_debug.json", serde_json::to_string_pretty(entries)?);
+            println!("DEBUG: Logged {} notes to all_notes_debug.json", entries.len());
+        }
+
         let result: NotesResponse = serde_json::from_value(data.clone())?;
 
         Ok(result)

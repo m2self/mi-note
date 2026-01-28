@@ -13,9 +13,20 @@ use widestring::WideCStr;
 use com::{ComPtr, ComRc, interfaces::IUnknown};
 use crate::api::AppConfig;
 
+use native_windows_gui as nwg;
+use std::rc::Rc;
+
 const INITIAL_URL: &str = "https://i.mi.com/note/h5#/";
 const WINDOW_CLASS: &str = "MiNoteWebViewMain";
 const WINDOW_TITLE: &str = "Xiaomi Cloud Note WebView";
+
+const WM_TRAY_ICON: UINT = WM_USER + 1;
+const TRAY_ICON_ID: UINT = 1;
+const HOTKEY_ID: i32 = 100;
+
+use winapi::um::shellapi::{NOTIFYICONDATAW, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIF_ICON, NIF_MESSAGE, NIF_TIP, Shell_NotifyIconW};
+use winapi::um::winuser::{RegisterHotKey, UnregisterHotKey, MOD_ALT};
+use winapi::um::wingdi::DeleteObject;
 
 static mut GLOBAL_CONTROLLER: Option<Controller> = None;
 
@@ -34,10 +45,15 @@ impl WebViewManager {
 
     pub fn run(&mut self) {
         unsafe {
+            nwg::init().expect("Failed to init NWG");
+
             CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
 
             let class_name: Vec<u16> = WINDOW_CLASS.encode_utf16().chain(std::iter::once(0)).collect();
             let title: Vec<u16> = WINDOW_TITLE.encode_utf16().chain(std::iter::once(0)).collect();
+
+            let h_instance = GetModuleHandleW(std::ptr::null());
+            let h_icon = LoadIconW(h_instance, 1 as *const u16); // ID 1 from build.rs
 
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -45,13 +61,13 @@ impl WebViewManager {
                 lpfnWndProc: Some(wnd_proc),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: GetModuleHandleW(std::ptr::null()),
-                hIcon: std::ptr::null_mut(),
+                hInstance: h_instance,
+                hIcon: h_icon,
                 hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
                 hbrBackground: (COLOR_WINDOW + 1) as _,
                 lpszMenuName: std::ptr::null(),
                 lpszClassName: class_name.as_ptr(),
-                hIconSm: std::ptr::null_mut(),
+                hIconSm: h_icon,
             };
 
             RegisterClassExW(&wc);
@@ -72,6 +88,20 @@ impl WebViewManager {
             );
 
             if self.hwnd.is_null() { panic!("Failed to create window"); }
+
+            crate::state::set_main_hwnd(self.hwnd);
+
+            // Initialize NWG GUI elements
+            crate::gui::launch_bar::init_launch_bar();
+            crate::gui::settings::init_settings_window();
+
+            // Register Hotkey (Alt-L)
+            let config = AppConfig::load();
+            let (mods, vk) = (MOD_ALT as UINT, 0x4C as UINT); // Alt-L
+            RegisterHotKey(self.hwnd, HOTKEY_ID, mods, vk);
+
+            // Setup Tray Icon
+            setup_tray_icon(self.hwnd);
 
             ShowWindow(self.hwnd, SW_SHOW);
             UpdateWindow(self.hwnd);
@@ -209,22 +239,129 @@ fn wide_to_string(ptr: LPWSTR) -> String {
     }
 }
 
+const IDM_TRAY_HIDE: usize = 2001;
+const IDM_TRAY_RESTORE: usize = 2002;
+const IDM_TRAY_SWITCH: usize = 2003;
+const IDM_TRAY_SETTINGS: usize = 2004;
+const IDM_TRAY_EXIT: usize = 2005;
+
+fn setup_tray_icon(hwnd: HWND) {
+    unsafe {
+        let h_instance = GetModuleHandleW(std::ptr::null());
+        let h_icon = LoadIconW(h_instance, 1 as *const u16);
+
+        let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = hwnd;
+        nid.uID = TRAY_ICON_ID;
+        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        nid.uCallbackMessage = WM_TRAY_ICON;
+        nid.hIcon = h_icon;
+
+        let tip: Vec<u16> = "MiNote WebView".encode_utf16().chain(std::iter::once(0)).collect();
+        std::ptr::copy_nonoverlapping(tip.as_ptr(), nid.szTip.as_mut_ptr(), tip.len().min(128));
+
+        Shell_NotifyIconW(NIM_ADD, &mut nid);
+    }
+}
+
+fn show_tray_menu(hwnd: HWND) {
+    unsafe {
+        let h_menu = CreatePopupMenu();
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_HIDE, "隐藏窗口\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_RESTORE, "恢复窗口\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_SEPARATOR, 0, std::ptr::null());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SWITCH, "切换界面 (桌面/手机)\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SETTINGS, "设置\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_SEPARATOR, 0, std::ptr::null());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_EXIT, "退出\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+
+        let mut pos = winapi::shared::windef::POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pos);
+
+        SetForegroundWindow(hwnd);
+        TrackPopupMenu(h_menu, TPM_RIGHTBUTTON, pos.x, pos.y, 0, hwnd, std::ptr::null());
+        PostMessageW(hwnd, WM_NULL, 0, 0);
+        DestroyMenu(h_menu);
+    }
+}
+
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> isize {
     match msg {
         WM_DESTROY => {
-            unsafe { PostQuitMessage(0); }
+            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+            nid.hWnd = hwnd;
+            nid.uID = TRAY_ICON_ID;
+            Shell_NotifyIconW(NIM_DELETE, &mut nid);
+            UnregisterHotKey(hwnd, HOTKEY_ID);
+            PostQuitMessage(0);
             0
         }
-        WM_SIZE => {
-            unsafe {
-                if let Some(ref controller) = GLOBAL_CONTROLLER {
-                    let mut rect = winapi::shared::windef::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                    GetClientRect(hwnd, &mut rect);
-                    controller.put_bounds(rect).ok();
-                }
+        WM_HOTKEY => {
+            if wparam as i32 == HOTKEY_ID {
+                println!("Hotkey pressed!");
+                // Toggle Launch Bar
+                crate::gui::launch_bar::toggle_launch_bar();
             }
             0
         }
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        WM_TRAY_ICON => {
+            if lparam as UINT == WM_RBUTTONUP {
+                show_tray_menu(hwnd);
+            } else if lparam as UINT == WM_LBUTTONDBLCLK {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+            0
+        }
+        WM_COMMAND => {
+            match wparam as usize {
+                IDM_TRAY_HIDE => { ShowWindow(hwnd, SW_HIDE); }
+                IDM_TRAY_RESTORE => { ShowWindow(hwnd, SW_RESTORE); SetForegroundWindow(hwnd); }
+                IDM_TRAY_EXIT => { DestroyWindow(hwnd); }
+                IDM_TRAY_SWITCH => { switch_interface(); }
+                IDM_TRAY_SETTINGS => { crate::gui::settings::show_settings(); }
+                _ => {}
+            }
+            0
+        }
+        WM_SIZE => {
+            if wparam == SIZE_MINIMIZED {
+                ShowWindow(hwnd, SW_HIDE);
+                return 0;
+            }
+            if let Some(ref controller) = GLOBAL_CONTROLLER {
+                let mut rect = winapi::shared::windef::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                GetClientRect(hwnd, &mut rect);
+                controller.put_bounds(rect).ok();
+            }
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
+
+// toggle_launch_bar removed
+
+fn switch_interface() {
+    unsafe {
+        if let Some(ref controller) = GLOBAL_CONTROLLER {
+            if let Ok(webview) = controller.get_webview() {
+                let mut config = AppConfig::load();
+                if config.theme == "Mobile" {
+                    config.theme = "Desktop".to_string();
+                    println!("Switching to Desktop mode...");
+                    webview.navigate("https://i.mi.com/note/v2#/").ok();
+                } else {
+                    config.theme = "Mobile".to_string();
+                    println!("Switching to Mobile mode...");
+                    webview.navigate("https://i.mi.com/note/h5#/").ok();
+                }
+                config.save().ok();
+            }
+        }
+    }
+}
+
+// show_settings removed

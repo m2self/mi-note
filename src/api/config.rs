@@ -3,10 +3,25 @@ use std::fs;
 use std::path::PathBuf;
 use directories::ProjectDirs;
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub account_cookie: Option<String>,
     pub user_agent: Option<String>,
+    pub hotkey: String,       // e.g. "Alt-L"
+    pub destination: String,  // "Clipboard" or "PreviousProgram"
+    pub theme: String,        // "Desktop" or "Mobile"
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            account_cookie: None,
+            user_agent: None,
+            hotkey: "Alt-L".to_string(),
+            destination: "Clipboard".to_string(),
+            theme: "Mobile".to_string(),
+        }
+    }
 }
 
 impl AppConfig {
