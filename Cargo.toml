@@ -33,6 +33,7 @@ once_cell = "1.18"
 winres = "0.1"
 
 [profile.minsizerel]
+inherits = "release"
 opt-level = "z"
 lto = true
 codegen-units = 1
