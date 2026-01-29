@@ -10,13 +10,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [windows-latest]
-
-    runs-on: ${{ matrix.os }}
+    name: Build (windows-latest)
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +35,33 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: target/minsizerel/mi-note-webview.exe
+          name: windows-binary
+          path: target/minsizerel/mi-note-webview.exe
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binary
+          path: dist
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
