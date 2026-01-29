@@ -14,7 +14,6 @@ use com::{ComPtr, ComRc, interfaces::IUnknown};
 use crate::api::AppConfig;
 
 use native_windows_gui as nwg;
-use std::rc::Rc;
 
 const INITIAL_URL: &str = "https://i.mi.com/note/h5#/";
 const WINDOW_CLASS: &str = "MiNoteWebViewMain";
@@ -24,9 +23,8 @@ const WM_TRAY_ICON: UINT = WM_USER + 1;
 const TRAY_ICON_ID: UINT = 1;
 const HOTKEY_ID: i32 = 100;
 
-use winapi::um::shellapi::{NOTIFYICONDATAW, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIF_ICON, NIF_MESSAGE, NIF_TIP, Shell_NotifyIconW};
+use winapi::um::shellapi::{NOTIFYICONDATAW, NIM_ADD, NIM_DELETE, NIF_ICON, NIF_MESSAGE, NIF_TIP, Shell_NotifyIconW};
 use winapi::um::winuser::{RegisterHotKey, UnregisterHotKey, MOD_ALT};
-use winapi::um::wingdi::DeleteObject;
 
 static mut GLOBAL_CONTROLLER: Option<Controller> = None;
 
@@ -72,6 +70,9 @@ impl WebViewManager {
 
             RegisterClassExW(&wc);
 
+            let config = AppConfig::load();
+            let (w, h) = if config.theme == "Mobile" { (600, 800) } else { (1280, 960) };
+
             self.hwnd = CreateWindowExW(
                 0,
                 class_name.as_ptr(),
@@ -79,8 +80,8 @@ impl WebViewManager {
                 WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                1200,
-                900,
+                w,
+                h,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 GetModuleHandleW(std::ptr::null()),
@@ -96,7 +97,7 @@ impl WebViewManager {
             crate::gui::settings::init_settings_window();
 
             // Register Hotkey (Alt-L)
-            let config = AppConfig::load();
+            let _config = AppConfig::load();
             let (mods, vk) = (MOD_ALT as UINT, 0x4C as UINT); // Alt-L
             RegisterHotKey(self.hwnd, HOTKEY_ID, mods, vk);
 
@@ -123,6 +124,15 @@ impl WebViewManager {
                     controller.put_is_visible(true).ok();
 
                     let webview = controller.get_webview().expect("Failed to get webview");
+
+                    // Initial Emulation setup: Default to Mobile as requested
+                    let mut config = AppConfig::load();
+                    config.theme = "Mobile".to_string();
+                    config.save().ok();
+
+                    crate::dprintln!("Application starting. Forcing Mobile mode...");
+                    apply_professional_emulation(&webview, "Mobile");
+
                     webview.navigate(INITIAL_URL).ok();
 
                     let cookies_arc_nav = cookies_arc_inner.clone();
@@ -189,7 +199,7 @@ impl WebViewManager {
                                                     let cookies_arc_task = cookies_arc_final.clone();
                                                     wv.execute_script("navigator.userAgent", move |res| {
                                                         let ua = res.trim_matches('"').to_string();
-                                                        println!("Captured User-Agent: {}", ua);
+                                                        crate::dprintln!("Captured User-Agent: {}", ua);
                                                         let mut config = AppConfig::load();
                                                         config.account_cookie = Some(cookie_str.clone());
                                                         config.user_agent = Some(ua);
@@ -197,7 +207,7 @@ impl WebViewManager {
 
                                                         let mut guard = cookies_arc_task.lock().unwrap();
                                                         *guard = Some(cookie_str);
-                                                        println!("Cookies updated successfully.");
+                                                        crate::dprintln!("Cookies updated successfully.");
                                                         Ok(())
                                                     }).ok();
                                                 }
@@ -286,7 +296,7 @@ fn show_tray_menu(hwnd: HWND) {
     }
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> isize {
+unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> isize { unsafe {
     match msg {
         WM_DESTROY => {
             let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
@@ -300,7 +310,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
         }
         WM_HOTKEY => {
             if wparam as i32 == HOTKEY_ID {
-                println!("Hotkey pressed!");
+                crate::dprintln!("Hotkey pressed!");
                 // Toggle Launch Bar
                 crate::gui::launch_bar::toggle_launch_bar();
             }
@@ -340,7 +350,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
-}
+}}
 
 // toggle_launch_bar removed
 
@@ -349,17 +359,86 @@ fn switch_interface() {
         if let Some(ref controller) = GLOBAL_CONTROLLER {
             if let Ok(webview) = controller.get_webview() {
                 let mut config = AppConfig::load();
-                if config.theme == "Mobile" {
-                    config.theme = "Desktop".to_string();
-                    println!("Switching to Desktop mode...");
-                    webview.navigate("https://i.mi.com/note/v2#/").ok();
-                } else {
-                    config.theme = "Mobile".to_string();
-                    println!("Switching to Mobile mode...");
-                    webview.navigate("https://i.mi.com/note/h5#/").ok();
-                }
+
+                let new_theme = if config.theme == "Mobile" { "Desktop" } else { "Mobile" };
+                crate::dprintln!("Switching to {} mode...", new_theme);
+
+                config.theme = new_theme.to_string();
                 config.save().ok();
+
+                // Resize window based on new theme
+                let (w, h) = if new_theme == "Mobile" { (720, 960) } else { (1200, 900) };
+                if let Some(hwnd_wrapper) = crate::state::STATE.lock().unwrap().main_hwnd {
+                    let hwnd = hwnd_wrapper.0;
+                    SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
+                }
+
+                apply_professional_emulation(&webview, new_theme);
+
+                webview.reload().ok();
             }
+        }
+    }
+}
+
+fn apply_professional_emulation(webview: &webview2::WebView, theme: &str) {
+    let (ua, _platform, is_mobile) = if theme == "Mobile" {
+        (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "iPhone",
+            true
+        )
+    } else {
+        (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Win32",
+            false
+        )
+    };
+
+    crate::dprintln!("Applying professional emulation for: {} (Mobile={})", theme, is_mobile);
+
+    // 1. User Agent Override (via Settings2 for persistence)
+    if let Ok(settings) = webview.get_settings() {
+        let inner = settings.as_inner();
+        if let Some(settings2) = inner.get_interface::<dyn ICoreWebView2Settings2>() {
+            let ua_u16: Vec<u16> = ua.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                let _ = settings2.put_user_agent(ua_u16.as_ptr());
+            }
+        }
+    }
+
+    // 2. CDP Emulation for Device Metrics and Touch
+    unsafe {
+        let inner = webview.as_inner();
+        let wv2 = inner.get_interface::<dyn ICoreWebView2>();
+
+        if let Some(wv2) = wv2 {
+            // Emulation.setDeviceMetricsOverride
+            let metrics_params = format!(
+                r#"{{"width": 0, "height": 0, "deviceScaleFactor": 0, "mobile": {}, "screenOrientation": {{"type": "portraitPrimary", "angle": 0}}}}"#,
+                is_mobile
+            );
+            let params_u16: Vec<u16> = metrics_params.encode_utf16().chain(std::iter::once(0)).collect();
+            let method_u16: Vec<u16> = "Emulation.setDeviceMetricsOverride".encode_utf16().chain(std::iter::once(0)).collect();
+
+            let _ = wv2.call_dev_tools_protocol_method(
+                method_u16.as_ptr(),
+                params_u16.as_ptr(),
+                std::ptr::null_mut()
+            );
+
+            // Emulation.setTouchEmulationEnabled
+            let touch_params = format!(r#"{{"enabled": {}}}"#, is_mobile);
+            let touch_params_u16: Vec<u16> = touch_params.encode_utf16().chain(std::iter::once(0)).collect();
+            let touch_method_u16: Vec<u16> = "Emulation.setTouchEmulationEnabled".encode_utf16().chain(std::iter::once(0)).collect();
+
+            let _ = wv2.call_dev_tools_protocol_method(
+                touch_method_u16.as_ptr(),
+                touch_params_u16.as_ptr(),
+                std::ptr::null_mut()
+            );
         }
     }
 }

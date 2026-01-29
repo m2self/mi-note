@@ -3,14 +3,12 @@ use native_windows_derive as nwd;
 
 use nwd::NwgUi;
 use nwg::NativeUi;
-use std::rc::Rc;
 use std::cell::RefCell;
 use crate::state;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use crate::api::models::{Note, strip_tags};
+use crate::api::models::{Note, strip_tags_multiline};
 use winapi::um::winuser::*;
-use winapi::shared::windef::HWND;
 
 #[derive(Default, NwgUi)]
 pub struct LaunchBar {
@@ -20,15 +18,15 @@ pub struct LaunchBar {
     #[nwg_resource(source_file: Some("resources/icon.ico"))]
     icon: nwg::Icon,
 
-    #[nwg_control(size: (800, 450), position: (300, 300), title: "MiNote Launch Bar", flags: "WINDOW", ex_flags: 0x00000008, icon: Some(&data.icon))]
+    #[nwg_control(size: (800, 400), position: (300, 300), title: "MiNote Launch Bar", flags: "WINDOW", ex_flags: 0x00000008, icon: Some(&data.icon))]
     #[nwg_events( OnWindowClose: [LaunchBar::hide], OnKeyPress: [LaunchBar::handle_key(SELF, EVT_DATA)] )]
     window: nwg::Window,
 
     #[nwg_control(size: (780, 40), position: (10, 10), font: Some(&data.font), focus: true)]
-    #[nwg_events( OnTextInput: [LaunchBar::on_input_changed] )]
+    #[nwg_events( OnTextInput: [LaunchBar::on_input_changed], OnKeyPress: [LaunchBar::handle_key(SELF, EVT_DATA)] )]
     input: nwg::TextInput,
 
-    #[nwg_control(size: (780, 300), position: (10, 55), font: Some(&data.font), flags: "VISIBLE")]
+    #[nwg_control(size: (780, 335), position: (10, 55), font: Some(&data.font), flags: "VISIBLE")]
     #[nwg_events( OnListBoxSelect: [LaunchBar::on_select], OnListBoxDoubleClick: [LaunchBar::on_confirm] )]
     results_list: nwg::ListBox<String>,
 
@@ -40,7 +38,7 @@ impl LaunchBar {
     pub fn show(&self) {
         self.window.set_visible(true);
         self.input.set_focus();
-        // self.window.set_foreground(); // Window doesn't have set_foreground in NWG, use winapi if needed
+        // Force refresh on show
         self.on_input_changed();
     }
 
@@ -52,7 +50,10 @@ impl LaunchBar {
         let query = self.input.text();
         let notes = state::get_notes();
 
-        println!("LaunchBar matching: query='{}', cache_size={}", query, notes.len());
+        dprintln!("[LaunchBar] Input changed: query='{}', notes_in_cache={}", query, notes.len());
+        if notes.len() > 0 {
+            dprintln!("[LaunchBar] Example note in cache: {}", notes[0].display_title());
+        }
 
         let mut matches: Vec<(i64, Note)> = if query.is_empty() {
             notes.into_iter().map(|n| (0, n)).collect()
@@ -90,7 +91,7 @@ impl LaunchBar {
 
         *self.current_results.borrow_mut() = top_matches.clone();
 
-        println!("Found {} matches. Pushing to listbox...", top_matches.len());
+        dprintln!("Found {} matches. Pushing to listbox...", top_matches.len());
 
         self.results_list.clear();
         for note in &top_matches {
@@ -136,7 +137,8 @@ impl LaunchBar {
                             }
                             nwg::keys::_F => {
                                 let (start, _) = self.get_input_sel();
-                                self.set_input_sel(start + 1, start + 1);
+                                let len = self.input.text().len() as i32;
+                                if start < len { self.set_input_sel(start + 1, start + 1); }
                             }
                             nwg::keys::_B => {
                                 let (start, _) = self.get_input_sel();
@@ -144,6 +146,23 @@ impl LaunchBar {
                             }
                             nwg::keys::_N => { self.handle_key(&nwg::EventData::OnKey(nwg::keys::DOWN)); }
                             nwg::keys::_P => { self.handle_key(&nwg::EventData::OnKey(nwg::keys::UP)); }
+                            nwg::keys::_D => {
+                                // Delete forward
+                                let (start, _) = self.get_input_sel();
+                                let len = self.input.text().len() as i32;
+                                if start < len {
+                                    self.set_input_sel(start, start + 1);
+                                    if let Some(hwnd) = self.input.handle.hwnd() {
+                                        unsafe { SendMessageW(hwnd as _, WM_CHAR, 8, 0); } // Backspace actually works here if we select forward
+                                    }
+                                }
+                            }
+                            nwg::keys::_H => {
+                                // Backspace
+                                if let Some(hwnd) = self.input.handle.hwnd() {
+                                    unsafe { SendMessageW(hwnd as _, WM_CHAR, 8, 0); }
+                                }
+                            }
                             nwg::keys::_W => {
                                 let (start, _) = self.get_input_sel();
                                 let text = self.input.text();
@@ -207,15 +226,20 @@ impl LaunchBar {
 
     fn perform_action(&self, note: &Note) {
         let config = crate::api::AppConfig::load();
-        let content = note.content.clone().unwrap_or_else(|| note.snippet.clone());
+
+        // Use full content if available, fallback to snippet
+        let raw_content = note.content.clone().unwrap_or_else(|| note.snippet.clone());
+
+        // Decode HTML entities (e.g., &amp; -> &) and strip all <tags>
+        let clean_content = strip_tags_multiline(&raw_content);
 
         if config.destination == "Clipboard" {
-            set_clipboard_text(&content);
+            set_clipboard_text(&clean_content);
         } else {
             // Previous Program
             self.hide(); // Must hide first to return focus
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            type_text(&content);
+            std::thread::sleep(std::time::Duration::from_millis(500)); // Longer wait for safety
+            type_text(&clean_content);
         }
     }
 }
@@ -245,7 +269,7 @@ fn set_clipboard_text(text: &str) {
 
 fn type_text(text: &str) {
     // Basic SendInput implementation for previous focus
-    use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP};
+    use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP};
 
     let wide: Vec<u16> = text.encode_utf16().collect();
     for &ch in &wide {
@@ -253,13 +277,13 @@ fn type_text(text: &str) {
             let mut inputs: [INPUT; 2] = std::mem::zeroed();
 
             inputs[0].type_ = INPUT_KEYBOARD;
-            let mut ki = inputs[0].u.ki_mut();
+            let ki = inputs[0].u.ki_mut();
             ki.wVk = 0;
             ki.wScan = ch;
             ki.dwFlags = KEYEVENTF_UNICODE;
 
             inputs[1].type_ = INPUT_KEYBOARD;
-            let mut ki = inputs[1].u.ki_mut();
+            let ki = inputs[1].u.ki_mut();
             ki.wVk = 0;
             ki.wScan = ch;
             ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
@@ -281,14 +305,13 @@ pub fn init_launch_bar() {
 pub fn toggle_launch_bar() {
     unsafe {
         if let Some(ref lb) = GLOBAL_LAUNCH_BAR {
-            let is_visible = lb.window.visible();
-            if is_visible {
-                lb.window.set_visible(false);
+            if lb.window.visible() {
+                lb.hide();
             } else {
-                lb.window.set_visible(true);
-                lb.input.set_focus();
-                // Refresh list when showing
-                lb.on_input_changed();
+                if let Some(hwnd) = lb.window.handle.hwnd() {
+                   SetForegroundWindow(hwnd as _);
+                }
+                lb.show();
             }
         }
     }

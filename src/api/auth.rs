@@ -102,15 +102,15 @@ impl MiAccount {
             .header(header::USER_AGENT, &self.user_agent)
             .send().await?;
 
-        println!("STS Redirect Resp Status: {}", resp.status());
+        crate::dprintln!("STS Redirect Resp Status: {}", resp.status());
 
         if let Some(location) = resp.headers().get(header::LOCATION) {
             let loc_str = location.to_str()?.to_string();
-            println!("STS Redirect Location: {}", loc_str);
+            crate::dprintln!("STS Redirect Location: {}", loc_str);
             Ok(loc_str)
         } else {
-            let body = resp.text().await?;
-            println!("STS Redirect Body (no location): {}", body);
+            let _body = resp.text().await?;
+            crate::dprintln!("STS Redirect Body (no location): {}", _body);
             Err("no location in service login resp".into())
         }
     }
@@ -125,7 +125,7 @@ impl MiAccount {
             .header(header::USER_AGENT, &self.user_agent)
             .send().await?;
 
-        println!("Final Cookie Resp Status: {}", resp.status());
+        crate::dprintln!("Final Cookie Resp Status: {}", resp.status());
 
         let headers = resp.headers().clone();
         let cookies: Vec<String> = headers
@@ -141,7 +141,7 @@ impl MiAccount {
 
         let combined_cookies = cookies.join("; ");
         let tidied = self.tidy_kvs(&combined_cookies);
-        println!("Generated MiCloud Cookie: {}", tidied);
+        crate::dprintln!("Generated MiCloud Cookie: {}", tidied);
         Ok(tidied)
     }
 

@@ -3,7 +3,6 @@ use native_windows_derive as nwd;
 
 use nwd::NwgUi;
 use nwg::NativeUi;
-use std::rc::Rc;
 use crate::api::AppConfig;
 
 #[derive(Default, NwgUi)]
@@ -79,7 +78,7 @@ pub fn init_settings_window() {
 pub fn show_settings() {
     unsafe {
         if let Some(ref sw) = GLOBAL_SETTINGS_WINDOW {
-            sw.window.set_visible(true);
+            sw.show();
         }
     }
 }

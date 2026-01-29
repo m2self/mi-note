@@ -20,10 +20,10 @@ impl Client {
     pub fn new(account_cookie: &str, user_agent: Option<String>) -> Self {
         let account = MiAccount::new(account_cookie);
         let http = HttpClient::builder()
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap();
 
-        // If the provided cookie already looks like a micloud cookie (has serviceToken), use it immediately
         let initial_micloud_cookie = if account_cookie.contains("serviceToken") {
             account_cookie.to_string()
         } else {
@@ -48,7 +48,12 @@ impl Client {
     }
 
     async fn do_request(&self, method: reqwest::Method, url: String, form: Option<HashMap<String, String>>) -> crate::api::MiResult<ReqResult> {
+        let is_mobile = self.user_agent.contains("iPhone") || self.user_agent.contains("Android") || self.user_agent.contains("Mobile");
+
         for _i in 0..3 {
+            if _i > 0 {
+                crate::dprintln!("[Background API] Attempt {} for URL: {}", _i + 1, url);
+            }
             let mut req = self.http.request(method.clone(), &url);
 
             // Add cookies
@@ -67,9 +72,8 @@ impl Client {
                 .header("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
                 .header("priority", "u=1, i")
                 .header(header::REFERER, "https://i.mi.com/note/h5")
-                .header("Sec-Ch-Ua", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Microsoft Edge\";v=\"144\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                .header("Sec-Ch-Ua-Mobile", if is_mobile { "?1" } else { "?0" })
+                .header("Sec-Ch-Ua-Platform", if is_mobile { "\"iOS\"" } else { "\"Windows\"" })
                 .header("Sec-Fetch-Dest", "empty")
                 .header("Sec-Fetch-Mode", "cors")
                 .header("Sec-Fetch-Site", "same-origin");
@@ -77,7 +81,7 @@ impl Client {
             // X-XSRF-TOKEN is ONLY for POST/PUT/DELETE, NOT for GET requests
             if method != reqwest::Method::GET {
                 if let Some(ph) = Self::extract_cookie_value(&final_cookie, "i.mi.com_ph") {
-                    println!("Adding X-XSRF-TOKEN header for {} request", method);
+                    crate::dprintln!("Adding X-XSRF-TOKEN header for {} request", method);
                     req = req.header("X-XSRF-TOKEN", ph);
                 }
             }
@@ -89,7 +93,7 @@ impl Client {
             let resp = match req.send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    println!("Request SEND ERROR: {} | URL: {}", e, url);
+                    crate::dprintln!("Request SEND ERROR: {} | URL: {}", e, url);
                     if _i == 2 { return Err(e.into()); }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     continue;
@@ -101,7 +105,7 @@ impl Client {
                 let _body = String::from_utf8_lossy(&bytes);
 
                 if _i < 2 {
-                    println!("Attempting STS refresh...");
+                    crate::dprintln!("Attempting STS refresh...");
 
                     // Get fresh cookies via STS in a scope to ensure locks are released
                     let new_cookie_result = {
@@ -112,11 +116,11 @@ impl Client {
 
                     let new_cookie = match new_cookie_result {
                         Ok(cookie) => {
-                            println!("STS refresh successful.");
+                            crate::dprintln!("STS refresh successful.");
                             cookie
                         },
                         Err(e) => {
-                            println!("STS refresh FAILED: {}", e);
+                            crate::dprintln!("STS refresh FAILED: {}", e);
                             return Err(format!("STS error: {}", e).into());
                         },
                     };
@@ -152,7 +156,7 @@ impl Client {
         let json: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(j) => j,
             Err(e) => {
-                println!("JSON Parse ERROR: {} | Body: {}", e, String::from_utf8_lossy(&bytes));
+                crate::dprintln!("JSON Parse ERROR: {} | Body: {}", e, String::from_utf8_lossy(&bytes));
                 return Err(e.into());
             }
         };
@@ -178,10 +182,10 @@ impl Client {
             "no data in response"
         })?;
 
-        // Debug: Write all notes to a scratch file for diagnosis
-        if let Some(entries) = data.get("entries").and_then(|e| e.as_array()) {
-            let _ = std::fs::write("..\\..\\scratch\\all_notes_debug.json", serde_json::to_string_pretty(entries)?);
-            println!("DEBUG: Logged {} notes to all_notes_debug.json", entries.len());
+        // Debug: Write the whole data object to a scratch file
+        let _ = std::fs::write("..\\..\\scratch\\full_data_debug.json", serde_json::to_string_pretty(data)?);
+        if let Some(_entries) = data.get("entries").and_then(|e| e.as_array()) {
+            crate::dprintln!("DEBUG: API returned {} notes.", _entries.len());
         }
 
         let result: NotesResponse = serde_json::from_value(data.clone())?;
