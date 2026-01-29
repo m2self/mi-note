@@ -9,6 +9,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use crate::api::models::{Note, strip_tags_multiline};
 use winapi::um::winuser::*;
+use winapi::um::libloaderapi::GetModuleHandleW;
 
 #[derive(Default, NwgUi)]
 pub struct LaunchBar {
@@ -309,7 +310,19 @@ static mut GLOBAL_LAUNCH_BAR: Option<LaunchBarUi> = None;
 
 pub fn init_launch_bar() {
     unsafe {
-        GLOBAL_LAUNCH_BAR = Some(LaunchBar::build_ui(Default::default()).expect("Failed to build LaunchBar UI"));
+        let ui = LaunchBar::build_ui(Default::default()).expect("Failed to build LaunchBar UI");
+
+        // Manual icon set from embedded resource (ID 1)
+        if let Some(hwnd) = ui.window.handle.hwnd() {
+            let h_instance = GetModuleHandleW(std::ptr::null());
+            let h_icon = LoadIconW(h_instance, 1 as *const u16);
+            if !h_icon.is_null() {
+                SendMessageW(hwnd as _, WM_SETICON, ICON_SMALL as usize, h_icon as isize);
+                SendMessageW(hwnd as _, WM_SETICON, ICON_BIG as usize, h_icon as isize);
+            }
+        }
+
+        GLOBAL_LAUNCH_BAR = Some(ui);
     }
 }
 

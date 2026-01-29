@@ -4,6 +4,8 @@ use native_windows_derive as nwd;
 use nwd::NwgUi;
 use nwg::NativeUi;
 use crate::api::AppConfig;
+use winapi::um::winuser::*;
+use winapi::um::libloaderapi::GetModuleHandleW;
 
 #[derive(Default, NwgUi)]
 pub struct SettingsWindow {
@@ -71,7 +73,19 @@ static mut GLOBAL_SETTINGS_WINDOW: Option<SettingsWindowUi> = None;
 
 pub fn init_settings_window() {
     unsafe {
-        GLOBAL_SETTINGS_WINDOW = Some(SettingsWindow::build_ui(Default::default()).expect("Failed to build SettingsWindow UI"));
+        let ui = SettingsWindow::build_ui(Default::default()).expect("Failed to build SettingsWindow UI");
+
+        // Manual icon set from embedded resource (ID 1)
+        if let Some(hwnd) = ui.window.handle.hwnd() {
+            let h_instance = GetModuleHandleW(std::ptr::null());
+            let h_icon = LoadIconW(h_instance, 1 as *const u16);
+            if !h_icon.is_null() {
+                SendMessageW(hwnd as _, WM_SETICON, ICON_SMALL as usize, h_icon as isize);
+                SendMessageW(hwnd as _, WM_SETICON, ICON_BIG as usize, h_icon as isize);
+            }
+        }
+
+        GLOBAL_SETTINGS_WINDOW = Some(ui);
     }
 }
 
