@@ -17,7 +17,7 @@ use native_windows_gui as nwg;
 
 const INITIAL_URL: &str = "https://i.mi.com/note/h5#/";
 const WINDOW_CLASS: &str = "MiNoteWebViewMain";
-const WINDOW_TITLE: &str = "Xiaomi Cloud Note WebView";
+const WINDOW_TITLE: &str = "Xiaomi Cloud Note";
 
 const WM_TRAY_ICON: UINT = WM_USER + 1;
 const TRAY_ICON_ID: UINT = 1;
@@ -208,6 +208,7 @@ impl WebViewManager {
                                                         let mut guard = cookies_arc_task.lock().unwrap();
                                                         *guard = Some(cookie_str);
                                                         crate::dprintln!("Cookies updated successfully.");
+                                                        crate::state::WAKE_UP_NOTIFY.notify_one();
                                                         Ok(())
                                                     }).ok();
                                                 }
@@ -278,13 +279,13 @@ fn setup_tray_icon(hwnd: HWND) {
 fn show_tray_menu(hwnd: HWND) {
     unsafe {
         let h_menu = CreatePopupMenu();
-        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_HIDE, "隐藏窗口\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
-        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_RESTORE, "恢复窗口\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_HIDE, "Hide Window\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_RESTORE, "Restore Window\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
         AppendMenuW(h_menu, MF_SEPARATOR, 0, std::ptr::null());
-        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SWITCH, "切换界面 (桌面/手机)\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
-        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SETTINGS, "设置\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SWITCH, "Switch Interface (Desktop/Mobile)\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_SETTINGS, "Settings\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
         AppendMenuW(h_menu, MF_SEPARATOR, 0, std::ptr::null());
-        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_EXIT, "退出\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
+        AppendMenuW(h_menu, MF_STRING, IDM_TRAY_EXIT, "Exit\0".encode_utf16().collect::<Vec<u16>>().as_ptr());
 
         let mut pos = winapi::shared::windef::POINT { x: 0, y: 0 };
         GetCursorPos(&mut pos);

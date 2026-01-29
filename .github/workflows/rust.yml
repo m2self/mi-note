@@ -1,0 +1,35 @@
+name: Rust
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Rust toolchain (stable)
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cache Cargo dependencies and build artifacts
+      - uses: Swatinem/rust-cache@v2
+
+      # Build using the min-size release profile (defined in Cargo.toml)
+      - name: Build (minsize release)
+        run: cargo build --profile minsizerel --verbose
+
+      # Run tests (kept as default test profile)
+      - name: Run tests
+        run: cargo test --verbose

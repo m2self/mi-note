@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
+use tokio::sync::Notify;
 use crate::api::models::Note;
 use winapi::shared::windef::HWND;
 #[allow(dead_code)]
@@ -20,9 +21,11 @@ pub static STATE: Lazy<Arc<Mutex<GlobalState>>> = Lazy::new(|| {
     }))
 });
 
+pub static WAKE_UP_NOTIFY: Lazy<Notify> = Lazy::new(|| Notify::new());
+
 pub fn update_notes(notes: Vec<Note>) {
-    let mut state = STATE.lock().unwrap();
     crate::dprintln!("Updating state with {} notes", notes.len());
+    let mut state = STATE.lock().unwrap();
     state.notes_cache = notes;
 }
 

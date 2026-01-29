@@ -18,15 +18,15 @@ pub struct LaunchBar {
     #[nwg_resource(source_file: Some("resources/icon.ico"))]
     icon: nwg::Icon,
 
-    #[nwg_control(size: (800, 400), position: (300, 300), title: "MiNote Launch Bar", flags: "WINDOW", ex_flags: 0x00000008, icon: Some(&data.icon))]
+    #[nwg_control(size: (600, 400), position: (300, 300), title: "MiNote Launch Bar", flags: "WINDOW", ex_flags: 0x00000008, icon: Some(&data.icon))]
     #[nwg_events( OnWindowClose: [LaunchBar::hide], OnKeyPress: [LaunchBar::handle_key(SELF, EVT_DATA)] )]
     window: nwg::Window,
 
-    #[nwg_control(size: (780, 40), position: (10, 10), font: Some(&data.font), focus: true)]
+    #[nwg_control(size: (580, 24), position: (10, 10), font: Some(&data.font), focus: true)]
     #[nwg_events( OnTextInput: [LaunchBar::on_input_changed], OnKeyPress: [LaunchBar::handle_key(SELF, EVT_DATA)] )]
     input: nwg::TextInput,
 
-    #[nwg_control(size: (780, 335), position: (10, 55), font: Some(&data.font), flags: "VISIBLE")]
+    #[nwg_control(size: (580, 340), position: (10, 55), font: Some(&data.font), flags: "VISIBLE")]
     #[nwg_events( OnListBoxSelect: [LaunchBar::on_select], OnListBoxDoubleClick: [LaunchBar::on_confirm] )]
     results_list: nwg::ListBox<String>,
 
@@ -36,10 +36,21 @@ pub struct LaunchBar {
 
 impl LaunchBar {
     pub fn show(&self) {
+        self.center_window();
         self.window.set_visible(true);
         self.input.set_focus();
         // Force refresh on show
         self.on_input_changed();
+    }
+
+    fn center_window(&self) {
+        let (screen_w, screen_h) = unsafe {
+            (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        };
+        let (win_w, win_h) = self.window.size();
+        let x = (screen_w - win_w as i32) / 2;
+        let y = (screen_h - win_h as i32) / 2;
+        self.window.set_position(x, y);
     }
 
     pub fn hide(&self) {

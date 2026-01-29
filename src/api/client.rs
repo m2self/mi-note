@@ -182,8 +182,6 @@ impl Client {
             "no data in response"
         })?;
 
-        // Debug: Write the whole data object to a scratch file
-        let _ = std::fs::write("..\\..\\scratch\\full_data_debug.json", serde_json::to_string_pretty(data)?);
         if let Some(_entries) = data.get("entries").and_then(|e| e.as_array()) {
             crate::dprintln!("DEBUG: API returned {} notes.", _entries.len());
         }

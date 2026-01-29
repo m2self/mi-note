@@ -17,22 +17,22 @@ pub struct SettingsWindow {
     #[nwg_events( OnWindowClose: [SettingsWindow::hide] )]
     window: nwg::Window,
 
-    #[nwg_control(size: (380, 25), position: (10, 10), text: "全局热键 (默认 Alt-L):", font: Some(&data.font))]
+    #[nwg_control(size: (380, 25), position: (10, 10), text: "Global Hotkey (Default Alt-L):", font: Some(&data.font))]
     label1: nwg::Label,
 
     #[nwg_control(size: (380, 30), position: (10, 40), text: "Alt-L", font: Some(&data.font))]
     hotkey_input: nwg::TextInput,
 
-    #[nwg_control(size: (380, 25), position: (10, 80), text: "选择后去向:", font: Some(&data.font))]
+    #[nwg_control(size: (380, 25), position: (10, 80), text: "Destination after selection:", font: Some(&data.font))]
     label2: nwg::Label,
 
-    #[nwg_control(text: "剪切板 (Clipboard)", position: (10, 110), size: (300, 25), font: Some(&data.font), check_state: nwg::RadioButtonState::Checked)]
+    #[nwg_control(text: "Clipboard", position: (10, 110), size: (300, 25), font: Some(&data.font), check_state: nwg::RadioButtonState::Checked)]
     dest_clipboard: nwg::RadioButton,
 
-    #[nwg_control(text: "上一个程序焦点 (Type text)", position: (10, 140), size: (300, 25), font: Some(&data.font))]
+    #[nwg_control(text: "Previous Program Focus (Type text)", position: (10, 140), size: (300, 25), font: Some(&data.font))]
     dest_type: nwg::RadioButton,
 
-    #[nwg_control(size: (100, 35), position: (280, 250), text: "保存", font: Some(&data.font))]
+    #[nwg_control(size: (100, 35), position: (280, 250), text: "Save", font: Some(&data.font))]
     #[nwg_events( OnButtonClick: [SettingsWindow::save] )]
     save_button: nwg::Button,
 }
